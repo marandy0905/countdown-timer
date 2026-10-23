@@ -218,7 +218,7 @@
       <div class="readout">
         <div class="phase" id="phase">準備開始</div>
         <div class="time" id="time">00:10</div>
-        <div class="round" id="round">共 3 輪</div>
+        <div class="round" id="round">共 3 組</div>
       </div>
     </div>
     <div class="controls">
@@ -264,12 +264,12 @@
   const voicePill = (v) => (v ? `${v} 秒` : '關閉');
   const VOICE = { min: 0, max: 60, unit: '秒', zero: '關閉' };
   const ROWS = [
-    { key: 'duration', title: '倒數時間', sub: '每一輪倒數多久',
+    { key: 'duration', title: '倒數時間', sub: '每一組倒數多久',
       cols: [{ min: 0, max: 60, unit: '分' }, { min: 0, max: 59, unit: '秒' }],
       read: ([m, s]) => clamp(m * 60 + s, 1, 3600),
       write: (v) => [Math.floor(v / 60), v % 60], pill: (v) => fmt(v) },
-    { key: 'gap', title: '間隔', sub: '每輪之間休息的秒數', cols: [{ min: 0, max: 600, unit: '秒' }], pill: secPill },
-    { key: 'rounds', title: '重複次數', sub: '總共倒數幾輪', cols: [{ min: 1, max: 999, unit: '輪' }], pill: (v) => `${v} 輪` },
+    { key: 'gap', title: '間隔', sub: '每組之間休息的秒數', cols: [{ min: 0, max: 600, unit: '秒' }], pill: secPill },
+    { key: 'rounds', title: '重複組數', sub: '總共倒數幾組', cols: [{ min: 1, max: 999, unit: '組' }], pill: (v) => `${v} 組` },
     { key: 'sayRun', title: '倒數語音', sub: '最後幾秒開始唸，0 為關閉', cols: [VOICE], pill: voicePill },
     { key: 'sayRest', title: '間隔語音', sub: '最後幾秒開始唸，0 為關閉', cols: [VOICE], pill: voicePill },
   ];
@@ -363,7 +363,7 @@
     if (!presets.length) {
       const p = document.createElement('p');
       p.className = 'empty';
-      p.textContent = '把常用的倒數、間隔與次數存起來，下次一點就能套用。';
+      p.textContent = '把常用的倒數、間隔與組數存起來，下次一點就能套用。';
       listEl.append(p);
       return;
     }
@@ -374,7 +374,7 @@
       row.innerHTML = '<button type="button" class="apply"><b></b><small></small></button>' +
                       '<button type="button" class="del" aria-label="刪除">×</button>';
       row.querySelector('b').textContent = `倒數 ${humanDur(p.duration)}`;
-      row.querySelector('small').textContent = `間隔 ${p.gap} 秒 · 重複 ${p.rounds} 次`;
+      row.querySelector('small').textContent = `間隔 ${p.gap} 秒 · 共 ${p.rounds} 組`;
       row.querySelector('.apply').onclick = () => applyPreset(p);
       row.querySelector('.del').onclick = () => removePreset(p);
       listEl.append(row);
@@ -436,20 +436,43 @@
   }
   const D = ['', '一', '二', '三', '四', '五', '六', '七', '八', '九'];
   const zh = (n) => n < 10 ? D[n] : n < 20 ? '十' + D[n - 10] : D[Math.floor(n / 10)] + '十' + D[n % 10];
-  function say(text) {
+  const zhBig = (n) => n < 100 ? zh(n) : D[Math.floor(n / 100)] + '百' + (n % 100 === 0 ? '' : n % 100 < 10 ? '零' + D[n % 100] : zh(n % 100));
+
+  let holdUtter = null, holdTimer = 0, spoken = 0;
+  const announcing = () => holdUtter !== null;     // an announcement outranks the numbers: they wait for it
+  const releaseHold = (u) => { if (holdUtter === u) { holdUtter = null; clearTimeout(holdTimer); } };
+
+  function say(text, { hold = false, queue = false } = {}) {
     try {
       const synth = window.speechSynthesis;
       if (!synth) return;
-      synth.cancel();                    // never queue stale numbers
+      if (!queue && (synth.speaking || synth.pending)) synth.cancel();   // never cancel an idle engine: that pops
       const u = new SpeechSynthesisUtterance(text);
       u.lang = 'zh-TW'; u.rate = 1.1;
       const v = synth.getVoices().find((x) => /zh[-_]TW/i.test(x.lang)) ||
                 synth.getVoices().find((x) => /^zh/i.test(x.lang));
       if (v) u.voice = v;
+      holdUtter = null; clearTimeout(holdTimer);
+      if (hold) {
+        holdUtter = u;
+        u.onend = u.onerror = () => releaseHold(u);
+        holdTimer = setTimeout(() => releaseHold(u), 5000);  // onend is unreliable on some browsers
+      }
+      spoken++;
       synth.speak(u);
     } catch {}
   }
-  const stopSpeech = () => { try { window.speechSynthesis && window.speechSynthesis.cancel(); } catch {} };
+  function unlockSpeech() {                        // iOS needs one speak() inside a tap; make it silent
+    try {
+      const u = new SpeechSynthesisUtterance(' ');
+      u.volume = 0; u.lang = 'zh-TW';
+      window.speechSynthesis.speak(u);
+    } catch {}
+  }
+  const stopSpeech = () => {
+    holdUtter = null; clearTimeout(holdTimer);
+    try { window.speechSynthesis && window.speechSynthesis.cancel(); } catch {}
+  };
   const buzz = (p) => { try { navigator.vibrate && navigator.vibrate(p); } catch {} };
 
   /* ---------- State machine (timestamp-based, drift-free) ---------- */
@@ -481,13 +504,13 @@
 
     if (state === 'run') {
       els.phase.textContent = paused ? '已暫停' : '倒數中';
-      els.round.textContent = `第 ${round} / ${cfg.rounds} 輪`;
+      els.round.textContent = `第 ${round} / ${cfg.rounds} 組`;
     } else if (state === 'rest') {
       els.phase.textContent = paused ? '已暫停' : lead ? '準備開始' : '休息一下';
-      els.round.textContent = `下一輪：第 ${lead ? round : round + 1} / ${cfg.rounds} 輪`;
+      els.round.textContent = `下一組：第 ${lead ? round : round + 1} / ${cfg.rounds} 組`;
     } else if (state === 'done') {
       els.phase.textContent = '完成';
-      els.round.textContent = `已完成 ${cfg.rounds} 輪`;
+      els.round.textContent = `已完成 ${cfg.rounds} 組`;
     }
     if (state === 'run' || state === 'rest') document.title = `${fmt(rem)} · ${els.phase.textContent}`;
   }
@@ -498,7 +521,7 @@
     els.time.textContent = fmt(cfg.duration);
     els.bar.style.strokeDashoffset = 0;
     els.phase.textContent = '準備開始';
-    els.round.textContent = `共 ${cfg.rounds} 輪 · 間隔 ${cfg.gap} 秒`;
+    els.round.textContent = `共 ${cfg.rounds} 組 · 間隔 ${cfg.gap} 秒`;
     root.style.setProperty('--accent', COLORS.idle);
   }
 
@@ -515,8 +538,10 @@
         lastWhole = whole;
         const from = state === 'rest' ? cfg.sayRest : cfg.sayRun;
         if (whole > 0 && whole <= from) {
-          if (state === 'rest' && !announced) { announced = true; say('準備開始'); }  // right before the numbers
-          else say(zh(whole));
+          if (state === 'rest' && !announced) {      // 「第N組準備開始」, right before the numbers
+            announced = true;
+            say(`第${zhBig(lead ? round : round + 1)}組準備開始`, { hold: true, queue: true });   // queue: let a trailing 「時間到」 finish first
+          } else if (!announcing()) say(zh(whole));  // numbers that fall inside the announcement are skipped
         }
       }
       if (rem <= 0) advance();
@@ -576,7 +601,6 @@
   }
 
   els.main.onclick = () => {
-    say('');                             // unlock speech on user gesture
     if (state === 'idle' || state === 'done') {
       round = 1; paused = false;
       lead = cfg.sayRest > 0;           // opening lead-in lasts only as long as the spoken rest countdown
@@ -587,6 +611,9 @@
       remainingAtPause = remaining(); paused = true; stopSpeech();
     }
     setUI();
+    const before = spoken;
+    step();                              // speak inside the tap so iOS allows it
+    if (spoken === before && !paused) unlockSpeech();
   };
 
   els.reset.onclick = () => {
