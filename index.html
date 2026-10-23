@@ -1,0 +1,430 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="color-scheme" content="light dark">
+<title>循環倒數計時器</title>
+<style>
+  :root {
+    --bg: #f2f2f7;
+    --card: rgba(255, 255, 255, 0.72);
+    --card-border: rgba(255, 255, 255, 0.6);
+    --text: #1c1c1e;
+    --text-2: #6e6e73;
+    --track: rgba(60, 60, 67, 0.12);
+    --fill: rgba(120, 120, 128, 0.16);
+    --blue: #0a84ff;
+    --orange: #ff9f0a;
+    --green: #30d158;
+    --red: #ff453a;
+    --accent: var(--blue);
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #000;
+      --card: rgba(44, 44, 46, 0.66);
+      --card-border: rgba(255, 255, 255, 0.08);
+      --text: #f5f5f7;
+      --text-2: #98989f;
+      --track: rgba(235, 235, 245, 0.14);
+      --fill: rgba(120, 120, 128, 0.32);
+    }
+  }
+  @media (prefers-contrast: more) {
+    :root { --card: var(--bg); --card-border: var(--text-2); }
+  }
+  @media (prefers-reduced-transparency: reduce) {
+    .card { background: var(--bg) !important; backdrop-filter: none !important; }
+  }
+
+  * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+  html, body { height: 100%; }
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--text);
+    font: 100%/1.5 system-ui, -apple-system, "SF Pro Text", "PingFang TC", sans-serif;
+    display: grid;
+    place-items: center;
+    padding: max(16px, env(safe-area-inset-top)) 16px max(16px, env(safe-area-inset-bottom));
+    transition: background-color 0.6s ease;
+  }
+  body::before {
+    content: "";
+    position: fixed; inset: 0;
+    background: radial-gradient(60% 50% at 50% 0%, color-mix(in srgb, var(--accent) 22%, transparent), transparent 70%);
+    transition: background 0.8s ease;
+    pointer-events: none;
+  }
+
+  main { position: relative; width: min(100%, 26rem); display: grid; gap: 1rem; }
+
+  .card {
+    background: var(--card);
+    border: 1px solid var(--card-border);
+    border-radius: 1.75rem;
+    backdrop-filter: blur(24px) saturate(180%);
+    -webkit-backdrop-filter: blur(24px) saturate(180%);
+    box-shadow: 0 10px 40px rgba(0, 0, 0, 0.08);
+  }
+
+  /* ---------- Dial ---------- */
+  .dial { padding: 1.75rem 1.5rem 1.5rem; text-align: center; }
+  .ring-wrap { position: relative; width: min(72vw, 17rem); aspect-ratio: 1; margin: 0 auto; }
+  svg { width: 100%; height: 100%; transform: rotate(-90deg); }
+  .track, .bar { fill: none; stroke-width: 10; }
+  .track { stroke: var(--track); }
+  .bar { stroke: var(--accent); stroke-linecap: round; transition: stroke 0.5s ease; }
+  .readout { position: absolute; inset: 0; display: grid; place-content: center; gap: 0.15rem; }
+  .phase { font-size: 0.95rem; font-weight: 600; color: var(--accent); letter-spacing: 0.02em; transition: color 0.5s ease; }
+  .time {
+    font-size: clamp(3rem, 15vw, 4.25rem);
+    font-weight: 600;
+    line-height: 1.05;
+    letter-spacing: -0.03em;
+    font-variant-numeric: tabular-nums;
+  }
+  .round { font-size: 0.9rem; color: var(--text-2); }
+
+  .controls { display: flex; justify-content: center; gap: 0.75rem; margin-top: 1.5rem; }
+  .btn {
+    appearance: none; border: 0; cursor: pointer;
+    font: inherit; font-weight: 600; font-size: 1.05rem;
+    min-width: 7rem; padding: 0.85rem 1.5rem;
+    border-radius: 999px;
+    background: var(--fill); color: var(--text);
+    transition: transform 120ms ease-out, opacity 120ms ease-out, background-color 0.3s;
+  }
+  .btn:active { transform: scale(0.96); opacity: 0.8; }
+  .btn.primary { background: var(--accent); color: #fff; }
+  .btn:disabled { opacity: 0.35; pointer-events: none; }
+  .btn:focus-visible, input:focus-visible { outline: 3px solid color-mix(in srgb, var(--accent) 60%, transparent); outline-offset: 2px; }
+
+  /* ---------- Settings ---------- */
+  .settings { padding: 0.25rem 1.25rem; }
+  .row { display: flex; align-items: center; justify-content: space-between; gap: 1rem; padding: 0.9rem 0; }
+  .row + .row { border-top: 1px solid var(--track); }
+  .label b { display: block; font-weight: 600; }
+  .label small { color: var(--text-2); font-size: 0.8rem; }
+  .stepper { display: flex; align-items: center; gap: 0.25rem; background: var(--fill); border-radius: 999px; padding: 0.2rem; }
+  .stepper button {
+    appearance: none; border: 0; cursor: pointer; width: 2.25rem; height: 2.25rem; border-radius: 50%;
+    background: transparent; color: var(--text); font-size: 1.25rem; line-height: 1;
+    transition: transform 100ms ease-out, background-color 100ms;
+  }
+  .stepper button:active { transform: scale(0.88); background: var(--track); }
+  .stepper input {
+    width: 3.6rem; border: 0; background: transparent; color: var(--text);
+    font: inherit; font-weight: 600; text-align: center; font-variant-numeric: tabular-nums;
+    -moz-appearance: textfield;
+  }
+  .stepper input::-webkit-outer-spin-button, .stepper input::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
+  .settings.locked { opacity: 0.5; pointer-events: none; }
+
+  /* Done pulse */
+  @keyframes pop { 0% { transform: scale(1); } 40% { transform: scale(1.05); } 100% { transform: scale(1); } }
+  .ring-wrap.pop { animation: pop 0.5s cubic-bezier(.3,1.4,.5,1); }
+
+  @media (prefers-reduced-motion: reduce) {
+    * { transition-duration: 0.01ms !important; animation: none !important; }
+  }
+</style>
+</head>
+<body>
+<main>
+  <section class="card dial" aria-live="polite">
+    <div class="ring-wrap" id="ringWrap">
+      <svg viewBox="0 0 100 100" aria-hidden="true">
+        <circle class="track" cx="50" cy="50" r="45"/>
+        <circle class="bar" id="bar" cx="50" cy="50" r="45"/>
+      </svg>
+      <div class="readout">
+        <div class="phase" id="phase">準備開始</div>
+        <div class="time" id="time">00:10</div>
+        <div class="round" id="round">共 3 輪</div>
+      </div>
+    </div>
+    <div class="controls">
+      <button class="btn" id="reset" disabled>重設</button>
+      <button class="btn primary" id="main">開始</button>
+    </div>
+  </section>
+
+  <section class="card settings" id="settings">
+    <div class="row">
+      <div class="label"><b>倒數時間</b><small id="durHint">秒</small></div>
+      <div class="stepper" data-key="duration" data-min="1" data-max="3600" data-step="5">
+        <button type="button" aria-label="減少">−</button>
+        <input type="number" inputmode="numeric" aria-label="倒數秒數" value="10">
+        <button type="button" aria-label="增加">+</button>
+      </div>
+    </div>
+    <div class="row">
+      <div class="label"><b>間隔</b><small>每輪之間休息的秒數</small></div>
+      <div class="stepper" data-key="gap" data-min="0" data-max="600" data-step="1">
+        <button type="button" aria-label="減少">−</button>
+        <input type="number" inputmode="numeric" aria-label="間隔秒數" value="3">
+        <button type="button" aria-label="增加">+</button>
+      </div>
+    </div>
+    <div class="row">
+      <div class="label"><b>重複次數</b><small>總共倒數幾輪</small></div>
+      <div class="stepper" data-key="rounds" data-min="1" data-max="999" data-step="1">
+        <button type="button" aria-label="減少">−</button>
+        <input type="number" inputmode="numeric" aria-label="重複次數" value="3">
+        <button type="button" aria-label="增加">+</button>
+      </div>
+    </div>
+    <div class="row">
+      <div class="label"><b>倒數語音</b><small>最後幾秒開始唸，0 為關閉</small></div>
+      <div class="stepper" data-key="sayRun" data-min="0" data-max="60" data-step="1">
+        <button type="button" aria-label="減少">−</button>
+        <input type="number" inputmode="numeric" aria-label="倒數階段語音起點秒數" value="5">
+        <button type="button" aria-label="增加">+</button>
+      </div>
+    </div>
+    <div class="row">
+      <div class="label"><b>間隔語音</b><small>最後幾秒開始唸，0 為關閉</small></div>
+      <div class="stepper" data-key="sayRest" data-min="0" data-max="60" data-step="1">
+        <button type="button" aria-label="減少">−</button>
+        <input type="number" inputmode="numeric" aria-label="間隔階段語音起點秒數" value="10">
+        <button type="button" aria-label="增加">+</button>
+      </div>
+    </div>
+  </section>
+</main>
+
+<script>
+(() => {
+  const $ = (id) => document.getElementById(id);
+  const els = {
+    bar: $('bar'), phase: $('phase'), time: $('time'), round: $('round'),
+    main: $('main'), reset: $('reset'), settings: $('settings'),
+    ringWrap: $('ringWrap'), durHint: $('durHint'),
+  };
+  const root = document.documentElement;
+  const C = 2 * Math.PI * 45;
+  els.bar.style.strokeDasharray = C;
+
+  /* ---------- Settings (persisted) ---------- */
+  const KEY = 'loop-countdown-v1';
+  const cfg = { duration: 10, gap: 3, rounds: 3, sayRun: 5, sayRest: 10 };
+  try { Object.assign(cfg, JSON.parse(localStorage.getItem(KEY) || '{}')); } catch {}
+  const steppers = [...document.querySelectorAll('.stepper')];
+  const clamp = (v, lo, hi) => Math.min(hi, Math.max(lo, v));
+
+  function syncInputs() {
+    steppers.forEach((s) => { s.querySelector('input').value = cfg[s.dataset.key]; });
+    els.durHint.textContent = `秒 · ${fmt(cfg.duration)}`;
+  }
+  function save() { try { localStorage.setItem(KEY, JSON.stringify(cfg)); } catch {} }
+
+  steppers.forEach((s) => {
+    const { key, min, max, step } = s.dataset;
+    const input = s.querySelector('input');
+    const [dec, inc] = s.querySelectorAll('button');
+    const set = (v) => {
+      cfg[key] = clamp(Math.round(Number(v)) || +min, +min, +max);
+      input.value = cfg[key];
+      save(); renderIdle();
+    };
+    dec.onclick = () => set(cfg[key] - (key === 'duration' && cfg[key] > 5 ? +step : 1));
+    inc.onclick = () => set(cfg[key] + (key === 'duration' && cfg[key] >= 5 ? +step : 1));
+    input.onchange = () => set(input.value);
+  });
+
+  /* ---------- Helpers ---------- */
+  function fmt(sec) {
+    const s = Math.max(0, Math.ceil(sec));
+    return `${String(Math.floor(s / 60)).padStart(2, '0')}:${String(s % 60).padStart(2, '0')}`;
+  }
+  const COLORS = { idle: 'var(--blue)', run: 'var(--blue)', rest: 'var(--orange)', done: 'var(--green)' };
+
+  /* ---------- Feedback: sound + haptic on the same frame ---------- */
+  let audio;
+  function beep(freq = 880, dur = 0.16, vol = 0.2) {
+    try {
+      audio ||= new (window.AudioContext || window.webkitAudioContext)();
+      const o = audio.createOscillator(), g = audio.createGain();
+      o.frequency.value = freq; o.type = 'sine';
+      g.gain.setValueAtTime(vol, audio.currentTime);
+      g.gain.exponentialRampToValueAtTime(0.001, audio.currentTime + dur);
+      o.connect(g).connect(audio.destination);
+      o.start(); o.stop(audio.currentTime + dur);
+    } catch {}
+  }
+  const D = ['', '一', '二', '三', '四', '五', '六', '七', '八', '九'];
+  const zh = (n) => n < 10 ? D[n] : n < 20 ? '十' + D[n - 10] : D[Math.floor(n / 10)] + '十' + D[n % 10];
+  function say(text) {
+    try {
+      const synth = window.speechSynthesis;
+      if (!synth) return;
+      synth.cancel();                    // never queue stale numbers
+      const u = new SpeechSynthesisUtterance(text);
+      u.lang = 'zh-TW'; u.rate = 1.1;
+      const v = synth.getVoices().find((x) => /zh[-_]TW/i.test(x.lang)) ||
+                synth.getVoices().find((x) => /^zh/i.test(x.lang));
+      if (v) u.voice = v;
+      synth.speak(u);
+    } catch {}
+  }
+  const stopSpeech = () => { try { window.speechSynthesis && window.speechSynthesis.cancel(); } catch {} };
+  const buzz = (p) => { try { navigator.vibrate && navigator.vibrate(p); } catch {} };
+
+  /* ---------- State machine (timestamp-based, drift-free) ---------- */
+  let state = 'idle';            // idle | run | rest | done
+  let paused = false;
+  let round = 1;
+  let announced = false;         // 「準備開始」 spoken for this rest yet?
+  let lead = false;              // opening rest before round 1
+  let phaseStart = 0, phaseLen = 0, remainingAtPause = 0;
+  let raf = 0, lastWhole = -1;
+
+  const now = () => performance.now() / 1000;
+
+  function startPhase(kind, len) {
+    state = kind; phaseLen = len; phaseStart = now(); lastWhole = -1;
+    announced = false;
+    document.title = '循環倒數計時器';
+  }
+
+  function remaining() { return paused ? remainingAtPause : Math.max(0, phaseLen - (now() - phaseStart)); }
+
+  function render() {
+    const rem = remaining();
+    const showing = state === 'done' ? 0 : rem;
+    els.time.textContent = fmt(showing);
+    const progress = phaseLen ? rem / phaseLen : 0;
+    els.bar.style.strokeDashoffset = C * (1 - (state === 'done' ? 1 : progress));
+    root.style.setProperty('--accent', COLORS[state]);
+
+    if (state === 'run') {
+      els.phase.textContent = paused ? '已暫停' : '倒數中';
+      els.round.textContent = `第 ${round} / ${cfg.rounds} 輪`;
+    } else if (state === 'rest') {
+      els.phase.textContent = paused ? '已暫停' : lead ? '準備開始' : '休息一下';
+      els.round.textContent = `下一輪：第 ${lead ? round : round + 1} / ${cfg.rounds} 輪`;
+    } else if (state === 'done') {
+      els.phase.textContent = '完成';
+      els.round.textContent = `已完成 ${cfg.rounds} 輪`;
+    }
+    if (state === 'run' || state === 'rest') document.title = `${fmt(rem)} · ${els.phase.textContent}`;
+  }
+
+  function renderIdle() {
+    if (state !== 'idle') return;
+    phaseLen = cfg.duration;
+    els.time.textContent = fmt(cfg.duration);
+    els.bar.style.strokeDashoffset = 0;
+    els.phase.textContent = '準備開始';
+    els.round.textContent = `共 ${cfg.rounds} 輪 · 間隔 ${cfg.gap} 秒`;
+    root.style.setProperty('--accent', COLORS.idle);
+    els.durHint.textContent = `秒 · ${fmt(cfg.duration)}`;
+  }
+
+  function tick() { step(); raf = requestAnimationFrame(tick); }
+
+  // rAF stops in background tabs; keep the phases (and beeps) advancing there.
+  setInterval(() => { if (document.hidden) step(); }, 250);
+
+  function step() {
+    if (!paused && (state === 'run' || state === 'rest')) {
+      const rem = remaining();
+      const whole = Math.ceil(rem);
+      if (whole !== lastWhole) {          // count aloud from the user-chosen second, separately for run and rest
+        lastWhole = whole;
+        const from = state === 'rest' ? cfg.sayRest : cfg.sayRun;
+        if (whole > 0 && whole <= from) {
+          if (state === 'rest' && !announced) { announced = true; say('準備開始'); }  // right before the numbers
+          else say(zh(whole));
+        }
+      }
+      if (rem <= 0) advance();
+      render();
+    }
+  }
+
+  function advance() {
+    if (state === 'run') {
+      if (round >= cfg.rounds) return finish();
+      say('時間到'); buzz(80);
+      if (cfg.gap > 0) startPhase('rest', cfg.gap);
+      else { round++; startPhase('run', cfg.duration); }
+    } else if (state === 'rest') {
+      if (lead) lead = false; else round++;
+      say('開始'); buzz(40);
+      startPhase('run', cfg.duration);
+    }
+  }
+
+  function finish() {
+    state = 'done'; paused = false;
+    say('時間到'); buzz([100, 60, 100]);
+    els.ringWrap.classList.remove('pop'); void els.ringWrap.offsetWidth; els.ringWrap.classList.add('pop');
+    document.title = '完成 · 循環倒數計時器';
+    setUI();
+  }
+
+  /* ---------- Keep the screen awake while a timer is running ---------- */
+  let wake = null;
+  async function syncWake() {
+    const want = (state === 'run' || state === 'rest') && !paused;
+    try {
+      if (want && !wake && navigator.wakeLock && !document.hidden) {
+        wake = await navigator.wakeLock.request('screen');
+        wake.addEventListener('release', () => { wake = null; });
+      } else if (!want && wake) {
+        await wake.release(); wake = null;
+      }
+    } catch { wake = null; }
+  }
+  // The lock is dropped whenever the tab is hidden; take it back on return.
+  document.addEventListener('visibilitychange', () => { if (!document.hidden) syncWake(); });
+
+  function setUI() {
+    syncWake();
+    const running = state === 'run' || state === 'rest';
+    els.settings.classList.toggle('locked', running || paused);
+    els.reset.disabled = state === 'idle';
+    els.main.textContent =
+      state === 'idle' ? '開始' :
+      state === 'done' ? '再來一次' :
+      paused ? '繼續' : '暫停';
+    render();
+  }
+
+  els.main.onclick = () => {
+    say('');                             // unlock speech on user gesture
+    if (state === 'idle' || state === 'done') {
+      round = 1; paused = false;
+      lead = cfg.sayRest > 0;           // opening lead-in lasts only as long as the spoken rest countdown
+      if (lead) startPhase('rest', cfg.sayRest); else startPhase('run', cfg.duration);
+    } else if (paused) {
+      paused = false; phaseStart = now() - (phaseLen - remainingAtPause);
+    } else {
+      remainingAtPause = remaining(); paused = true; stopSpeech();
+    }
+    setUI();
+  };
+
+  els.reset.onclick = () => {
+    state = 'idle'; paused = false; round = 1; lead = false; stopSpeech();
+    document.title = '循環倒數計時器';
+    setUI(); renderIdle();
+  };
+
+  document.addEventListener('keydown', (e) => {
+    if (e.target.tagName === 'INPUT') return;
+    if (e.code === 'Space') { e.preventDefault(); els.main.click(); }
+    if (e.key === 'r' && !els.reset.disabled) els.reset.click();
+  });
+
+  syncInputs();
+  renderIdle();
+  setUI(); renderIdle();
+  raf = requestAnimationFrame(tick);
+})();
+</script>
+</body>
+</html>
