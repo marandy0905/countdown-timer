@@ -438,39 +438,94 @@
   const zh = (n) => n < 10 ? D[n] : n < 20 ? '十' + D[n - 10] : D[Math.floor(n / 10)] + '十' + D[n % 10];
   const zhBig = (n) => n < 100 ? zh(n) : D[Math.floor(n / 100)] + '百' + (n % 100 === 0 ? '' : n % 100 < 10 ? '零' + D[n % 100] : zh(n % 100));
 
-  let holdUtter = null, holdTimer = 0, spoken = 0;
-  const announcing = () => holdUtter !== null;     // an announcement outranks the numbers: they wait for it
-  const releaseHold = (u) => { if (holdUtter === u) { holdUtter = null; clearTimeout(holdTimer); } };
+  /* ---------- Voice: recorded clips via Web Audio, browser speech as fallback ---------- */
+  let holdTok = null, holdTimer = 0, spoken = 0, seq = 0;
+  const announcing = () => holdTok !== null;       // an announcement outranks the numbers: they wait for it
+  const releaseHold = (t) => { if (holdTok === t) { holdTok = null; clearTimeout(holdTimer); } };
 
-  function say(text, { hold = false, queue = false } = {}) {
+  let ctx = null, freeAt = 0;
+  const active = new Set();
+  const decoded = new Map();                       // clip name -> Promise<AudioBuffer | null>
+  function audioCtx() {
+    try {
+      ctx ||= new (window.AudioContext || window.webkitAudioContext)();
+      if (ctx.state === 'suspended') ctx.resume();
+    } catch {}
+    return ctx;
+  }
+  function loadClip(name) {
+    if (!decoded.has(name)) {
+      decoded.set(name, fetch(`audio/${name}.mp3`)
+        .then((r) => (r.ok ? r.arrayBuffer() : Promise.reject()))
+        .then((b) => new Promise((ok, no) => audioCtx().decodeAudioData(b, ok, no)))
+        .catch(() => null));
+    }
+    return decoded.get(name);
+  }
+  const CLIPS = [...Array.from({ length: 60 }, (_, i) => `n${i + 1}`), 'timeup', 'go',
+                 ...Array.from({ length: 99 }, (_, i) => `ready${i + 1}`)];
+  (window.requestIdleCallback || setTimeout)(() => CLIPS.forEach(loadClip));   // warm up while idle
+
+  function stopAudio() {
+    active.forEach((src) => { src.onended = null; try { src.stop(); } catch {} });
+    active.clear(); freeAt = 0;
+  }
+
+  // Silent looping <audio> flips iOS into "playback" mode, so the ringer switch doesn't mute Web Audio
+  let keepAlive = null;
+  function unlockAudio() {
+    audioCtx();
+    if (keepAlive) return;
+    try {
+      const n = 8000, v = new DataView(new ArrayBuffer(44 + n));
+      const w = (o, t) => [...t].forEach((c, i) => v.setUint8(o + i, c.charCodeAt(0)));
+      w(0, 'RIFF'); v.setUint32(4, 36 + n, true); w(8, 'WAVEfmt '); v.setUint32(16, 16, true);
+      v.setUint16(20, 1, true); v.setUint16(22, 1, true); v.setUint32(24, 8000, true);
+      v.setUint32(28, 8000, true); v.setUint16(32, 1, true); v.setUint16(34, 8, true);
+      w(36, 'data'); v.setUint32(40, n, true);
+      for (let i = 0; i < n; i++) v.setUint8(44 + i, 128);
+      keepAlive = new Audio(URL.createObjectURL(new Blob([v], { type: 'audio/wav' })));
+      keepAlive.loop = true; keepAlive.play().catch(() => {});
+    } catch {}
+  }
+
+  function speakFallback(text, hold, tok) {         // used when a clip is missing (e.g. past group 99)
     try {
       const synth = window.speechSynthesis;
       if (!synth) return;
-      if (!queue && (synth.speaking || synth.pending)) synth.cancel();   // never cancel an idle engine: that pops
       const u = new SpeechSynthesisUtterance(text);
       u.lang = 'zh-TW'; u.rate = 1.1;
       const v = synth.getVoices().find((x) => /zh[-_]TW/i.test(x.lang)) ||
                 synth.getVoices().find((x) => /^zh/i.test(x.lang));
       if (v) u.voice = v;
-      holdUtter = null; clearTimeout(holdTimer);
-      if (hold) {
-        holdUtter = u;
-        u.onend = u.onerror = () => releaseHold(u);
-        holdTimer = setTimeout(() => releaseHold(u), 5000);  // onend is unreliable on some browsers
-      }
-      spoken++;
+      if (hold) u.onend = u.onerror = () => releaseHold(tok);
       synth.speak(u);
     } catch {}
   }
-  function unlockSpeech() {                        // iOS needs one speak() inside a tap; make it silent
-    try {
-      const u = new SpeechSynthesisUtterance(' ');
-      u.volume = 0; u.lang = 'zh-TW';
-      window.speechSynthesis.speak(u);
-    } catch {}
+
+  async function say(text, { clip = null, hold = false, queue = false } = {}) {
+    const mine = ++seq;
+    spoken++;
+    if (!queue) {
+      stopAudio();
+      try { const sy = window.speechSynthesis; if (sy && (sy.speaking || sy.pending)) sy.cancel(); } catch {}
+    }
+    holdTok = null; clearTimeout(holdTimer);
+    const tok = {};
+    if (hold) { holdTok = tok; holdTimer = setTimeout(() => releaseHold(tok), 5000); }
+    const buf = clip ? await loadClip(clip) : null;
+    if (mine !== seq) return;                      // superseded while decoding
+    if (buf && ctx) {
+      const src = ctx.createBufferSource();
+      src.buffer = buf; src.connect(ctx.destination);
+      const at = Math.max(ctx.currentTime, queue ? freeAt : 0);
+      src.start(at); freeAt = at + buf.duration;
+      active.add(src);
+      src.onended = () => { active.delete(src); if (hold) releaseHold(tok); };
+    } else speakFallback(text, hold, tok);
   }
   const stopSpeech = () => {
-    holdUtter = null; clearTimeout(holdTimer);
+    seq++; holdTok = null; clearTimeout(holdTimer); stopAudio();
     try { window.speechSynthesis && window.speechSynthesis.cancel(); } catch {}
   };
   const buzz = (p) => { try { navigator.vibrate && navigator.vibrate(p); } catch {} };
@@ -540,8 +595,9 @@
         if (whole > 0 && whole <= from) {
           if (state === 'rest' && !announced) {      // 「第N組準備開始」, right before the numbers
             announced = true;
-            say(`第${zhBig(lead ? round : round + 1)}組準備開始`, { hold: true, queue: true });   // queue: let a trailing 「時間到」 finish first
-          } else if (!announcing()) say(zh(whole));  // numbers that fall inside the announcement are skipped
+            const g = lead ? round : round + 1;
+            say(`第${zhBig(g)}組準備開始`, { clip: `ready${g}`, hold: true, queue: true });   // queue: let a trailing 「時間到」 finish first
+          } else if (!announcing()) say(zh(whole), { clip: `n${whole}` });  // numbers that fall inside the announcement are skipped
         }
       }
       if (rem <= 0) advance();
@@ -552,19 +608,19 @@
   function advance() {
     if (state === 'run') {
       if (round >= cfg.rounds) return finish();
-      say('時間到'); buzz(80);
+      say('時間到', { clip: 'timeup' }); buzz(80);
       if (cfg.gap > 0) startPhase('rest', cfg.gap);
       else { round++; startPhase('run', cfg.duration); }
     } else if (state === 'rest') {
       if (lead) lead = false; else round++;
-      say('開始'); buzz(40);
+      say('開始', { clip: 'go' }); buzz(40);
       startPhase('run', cfg.duration);
     }
   }
 
   function finish() {
     state = 'done'; paused = false;
-    say('時間到'); buzz([100, 60, 100]);
+    say('時間到', { clip: 'timeup' }); buzz([100, 60, 100]);
     els.ringWrap.classList.remove('pop'); void els.ringWrap.offsetWidth; els.ringWrap.classList.add('pop');
     document.title = '完成 · 循環倒數計時器';
     setUI();
@@ -611,9 +667,8 @@
       remainingAtPause = remaining(); paused = true; stopSpeech();
     }
     setUI();
-    const before = spoken;
-    step();                              // speak inside the tap so iOS allows it
-    if (spoken === before && !paused) unlockSpeech();
+    unlockAudio();                       // inside the tap, so iOS lets the page make sound
+    step();
   };
 
   els.reset.onclick = () => {
@@ -630,6 +685,7 @@
 
   renderPresets();
   refreshPills();
+  if ('serviceWorker' in navigator) navigator.serviceWorker.register('sw.js').catch(() => {});
   renderIdle();
   setUI(); renderIdle();
   raf = requestAnimationFrame(tick);
