@@ -1,8 +1,8 @@
 // Offline support. HTML is network-first (so deploys show up immediately); audio and icons are cache-first.
-const CACHE = 'countdown-v2';
+const CACHE = 'countdown-v3';
 const clips = [
   ...Array.from({ length: 60 }, (_, i) => `audio/n${i + 1}.mp3`),
-  'audio/timeup.mp3', 'audio/go.mp3',
+  'audio/timeup.mp3', 'audio/lastdone.mp3', 'audio/go.mp3',
   ...Array.from({ length: 99 }, (_, i) => `audio/ready${i + 1}.mp3`),
 ];
 const SHELL = ['./', 'index.html', 'manifest.webmanifest', 'icons/icon.svg', 'icons/apple-touch-icon.png',

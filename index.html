@@ -462,7 +462,7 @@
     }
     return decoded.get(name);
   }
-  const CLIPS = [...Array.from({ length: 60 }, (_, i) => `n${i + 1}`), 'timeup', 'go',
+  const CLIPS = [...Array.from({ length: 60 }, (_, i) => `n${i + 1}`), 'timeup', 'lastdone', 'go',
                  ...Array.from({ length: 99 }, (_, i) => `ready${i + 1}`)];
   (window.requestIdleCallback || setTimeout)(() => CLIPS.forEach(loadClip));   // warm up while idle
 
@@ -620,7 +620,7 @@
 
   function finish() {
     state = 'done'; paused = false;
-    say('時間到', { clip: 'timeup' }); buzz([100, 60, 100]);
+    say('最後一組，完成了！', { clip: 'lastdone' }); buzz([100, 60, 100]);
     els.ringWrap.classList.remove('pop'); void els.ringWrap.offsetWidth; els.ringWrap.classList.add('pop');
     document.title = '完成 · 循環倒數計時器';
     setUI();
